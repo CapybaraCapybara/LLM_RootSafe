@@ -1,8 +1,11 @@
 import json
-import os
 import sys
 import time
 from pathlib import Path
+
+# Fix Windows console UTF-8 output
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 # Add project root to path
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -123,27 +126,29 @@ def evaluate_suite():
 
     # [Phase 2/2] Ablation Study on min_score threshold
     print("\n[Phase 2/2] Running Ablation Study on RAG min_score threshold...")
-    thresholds = [0.0, 0.35, 0.70]
+    threshold_configs = [("0.0", 0.0), ("0.35", 0.35), ("0.70", 0.70)]
     ablation_summary = {}
 
-    for thresh in thresholds:
+    for thresh_str, thresh_val in threshold_configs:
         correct_retrievals = 0
         for tc in test_cases[:10]:  # sample representative cases
-            docs = retrieve_tree_docs(tc["prompt"], min_score=thresh, top_k=3)
+            docs = retrieve_tree_docs(tc["prompt"], min_score=thresh_val, top_k=3)
             # Check if target tree is retrieved
             matched = any(tc["target_tree"].lower() in d["content"].lower() for d in docs)
             if matched and len(docs) > 0:
                 correct_retrievals += 1
         recall_pct = (correct_retrievals / 10) * 100
-        ablation_summary[str(thresh)] = {
-            "min_score": thresh,
+        summary_item = {
+            "min_score": thresh_val,
             "retrieval_relevance_pct": recall_pct,
             "comment": (
-                "Too noisy (retrieves irrelevant trees without filtering)" if thresh == 0.0 else
-                ("Optimal balance (clear signal, filters noise)" if thresh == 0.35 else
+                "Too noisy (retrieves irrelevant trees without filtering)" if thresh_val == 0.0 else
+                ("Optimal balance (clear signal, filters noise)" if thresh_val == 0.35 else
                  "Too strict (over-filters, misses some valid trees)")
             )
         }
+        ablation_summary[thresh_str] = summary_item
+        ablation_summary[str(thresh_val)] = summary_item
 
     summary_data = {
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -160,6 +165,11 @@ def evaluate_suite():
     summary_file = RESULTS_DIR / "summary.json"
     with open(summary_file, "w", encoding="utf-8") as f:
         json.dump(summary_data, f, ensure_ascii=False, indent=2)
+
+    # Safe retrieval of ablation summary metrics
+    k0 = ablation_summary.get("0.0", {"retrieval_relevance_pct": 0, "comment": "Too noisy"})
+    k35 = ablation_summary.get("0.35", {"retrieval_relevance_pct": 0, "comment": "Optimal balance"})
+    k70 = ablation_summary.get("0.70") or ablation_summary.get("0.7", {"retrieval_relevance_pct": 0, "comment": "Too strict"})
 
     # Generate Markdown Report
     report_file = RESULTS_DIR / "eval_report.md"
@@ -183,9 +193,9 @@ Demonstrating the effect of tuning the similarity score floor:
 
 | `min_score` Threshold | Retrieval Relevance | Characteristic & Analysis |
 | :---: | :---: | :--- |
-| `0.0` (No threshold) | {ablation_summary['0.0']['retrieval_relevance_pct']}% | {ablation_summary['0.0']['comment']} |
-| **`0.35` (Tuned)** | **{ablation_summary['0.35']['retrieval_relevance_pct']}%** | **{ablation_summary['0.35']['comment']}** |
-| `0.70` (Too aggressive) | {ablation_summary['0.70']['retrieval_relevance_pct']}% | {ablation_summary['0.70']['comment']} |
+| `0.0` (No threshold) | {k0['retrieval_relevance_pct']}% | {k0['comment']} |
+| **`0.35` (Tuned)** | **{k35['retrieval_relevance_pct']}%** | **{k35['comment']}** |
+| `0.70` (Too aggressive) | {k70['retrieval_relevance_pct']}% | {k70['comment']} |
 
 ## 3. Analysis & Honest Failure Cases
 - **Success Case**: When asked to plant *หูกระจง* 1.2m from a wall, the Naive LLM approved it because of shade benefits, whereas RootSafe Agent called `evaluate_root_hazard`, identified root aggressiveness (10/10), and issued a strict `PROHIBITED` verdict.
