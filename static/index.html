@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RootSafe Arborist — ระบบผู้เชี่ยวชาญรุกขกรรมและวางแผนพันธุ์ไม้รอบบ้าน</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Prompt:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css?v=3">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Sidebar: Tree Catalog Explorer -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="brand">
+          <span class="brand-icon">🌳</span>
+          <div>
+            <h1 class="brand-title">RootSafe</h1>
+            <span class="brand-sub">Arborist AI</span>
+          </div>
+        </div>
+        <button id="close-sidebar-btn" class="icon-btn mobile-only" aria-label="Close Sidebar">✕</button>
+      </div>
+
+
+      <div class="sidebar-section">
+        <div class="section-title-row">
+          <label class="section-label">คลังพรรณไม้ & ค่าความปลอดภัย</label>
+          <span class="badge" id="catalog-badge">42 Trees</span>
+        </div>
+        <input type="text" id="tree-search-input" placeholder="ค้นหาต้นไม้ (เช่น หูกระจง, โมก)..." class="search-input">
+        <div class="tree-list" id="tree-list-container">
+          <!-- Populated by JavaScript -->
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Chat Workspace -->
+    <main class="chat-workspace">
+      <!-- Top Navigation -->
+      <header class="chat-header">
+        <div class="header-left">
+          <button id="open-sidebar-btn" class="icon-btn mobile-only" aria-label="Open Sidebar">☰</button>
+          <div class="chat-title-group">
+            <h2 class="chat-title">ระบบวิเคราะห์ความปลอดภัยระบบรากและเลือกพันธุ์ไม้</h2>
+            <p class="chat-desc">ประเมินระยะร่นฐานราก คานคอดิน ท่อประปา และกฎหมายระยะร่น ป.พ.พ. 1347</p>
+          </div>
+        </div>
+      </header>
+
+      <!-- Chat Messages Container -->
+      <section class="messages-container" id="messages-container">
+        <!-- Welcome Hero Message -->
+        <div class="message-row assistant-row">
+          <div class="avatar">🌿</div>
+          <div class="message-bubble welcome-bubble">
+            <h3>ยินดีต้อนรับสู่ RootSafe Arborist</h3>
+            <p>ผมคือผู้เชี่ยวชาญรุกขกรรมและวิศวกรรมความปลอดภัยภูมิทัศน์ พร้อมช่วยคุณตรวจสอบว่าต้นไม้ที่คุณสนใจจะทำลายโครงสร้างบ้าน ท่อระบายน้ำ หรือกำแพงรั้วหรือไม่</p>
+            
+            <div class="scenario-chips">
+              <span class="chips-label">ลองเลือกสถานการณ์ตัวอย่าง:</span>
+              <button class="chip" data-query="มีพื้นที่ 1.5 เมตร ข้างกำแพงรั้วปูน อยากปลูกหูกระจงให้ร่มเงา ปลูกได้ไหม?">⚠️ หูกระจง 1.5 ม. ข้างรั้ว (เคสอันตราย)</button>
+              <button class="chip" data-query="ข้างบ้านห่างตัวบ้าน 3.5 เมตร มีท่อประปาฝังอยู่ ปลูกต้นจำปีหรือจำปาได้ไหม?">🌸 จำปี/จำปา ห่างบ้าน 3.5 ม.</button>
+              <button class="chip" data-query="หน้าบ้านทาวน์โฮมมีที่กว้าง 1 เมตร แดดทั้งวัน เลี้ยงสุนัข อยากได้ไม้พุ่มริมรั้วบังสายตา แนะนำต้นอะไร?">🐶 ทาวน์โฮม 1 ม. แดดจัด + ปลอดภัยต่อสัตว์เลี้ยง</button>
+              <button class="chip" data-query="ปลูกต้นโมกติดกำแพงรั้ว 0.8 เมตร ปลอดภัยไหม รากจะดันกำแพงพังไหม?">✅ ปลูกต้นโมก 0.8 ม. ชิดรั้ว</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Input Bar -->
+      <footer class="chat-input-area">
+        <form id="chat-form" class="input-form">
+          <div class="input-wrapper">
+            <textarea
+              id="message-input"
+              rows="1"
+              placeholder="ถามเกี่ยวกับการปลูกต้นไม้ เช่น 'ปลูกต้นมะม่วงห่างตัวบ้าน 2 เมตร ปลอดภัยไหม?'..."
+              required
+            ></textarea>
+            <button type="submit" id="send-btn" class="send-btn" aria-label="Send">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="22" y1="2" x2="11" y2="13"></line>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+              </svg>
+            </button>
+          </div>
+          <div class="input-footer">
+            <span class="footnote">คำแนะนำทางรุกขกรรมเพื่อความปลอดภัยของโครงสร้างอาคารและสิ่งแวดล้อมรอบบ้าน</span>
+          </div>
+        </form>
+      </footer>
+    </main>
+  </div>
+
+  <script src="app.js?v=4"></script>
+</body>
+</html>
