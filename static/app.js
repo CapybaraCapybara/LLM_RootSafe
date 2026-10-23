@@ -288,12 +288,15 @@ function renderStructuredCard(targetEl, data) {
         <span class="stat-value">${data.safe_setback_meters} เมตร</span>
       </div>
       <div class="stat-item">
-        <span class="stat-label">ข้อกฎหมายแนวรั้ว (ป.พ.พ. 1347)</span>
-        <span class="stat-value" style="font-size:12px;font-weight:400;">${escapeHtml(data.legal_neighbor_risk_notes)}</span>
+        <span class="stat-label">ข้อควรระวังพื้นที่ข้างเคียง</span>
+        <span class="stat-value" style="font-size:12px;font-weight:400;">${escapeHtml(data.neighbor_impact_notes || data.legal_neighbor_risk_notes || "ระวังกิ่งก้านและระบบรากแผ่ขยายล้ำแนวเขต")}</span>
       </div>
     </div>
     ${recHtml}
     ${citesHtml}
+    <div class="legal-disclaimer">
+      * คำแนะนำเพื่อความปลอดภัยเชิงโครงสร้างและรุกขกรรมเบื้องต้น มิใช่คำปรึกษาทางกฎหมาย
+    </div>
   `;
 
   targetEl.appendChild(card);

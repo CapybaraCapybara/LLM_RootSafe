@@ -102,7 +102,8 @@ def evaluate_root_hazard(args: RootHazardArgs) -> Dict[str, Any]:
         "root_type": tree["root_type"],
         "explanation": action,
         "root_behavior": tree["root_risk_description"],
-        "legal_neighbor_risk": tree["legal_neighbor_risk"],
+        "neighbor_impact": tree.get("legal_neighbor_risk", "ระวังกิ่งก้านและระบบรากแผ่ขยาย"),
+        "legal_neighbor_risk": tree.get("legal_neighbor_risk", "ระวังกิ่งก้านและระบบรากแผ่ขยาย"),
         "citations": [f"[Doc: {tree['name_th']}]"]
     }
 

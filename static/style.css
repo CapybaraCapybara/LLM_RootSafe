@@ -724,6 +724,15 @@ body {
   border-radius: 4px;
 }
 
+.legal-disclaimer {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 8px;
+  font-style: italic;
+  border-top: 1px dashed var(--border-subtle);
+  padding-top: 6px;
+}
+
 /* Chat Input Area */
 .chat-input-area {
   padding: 16px 28px 20px;

@@ -10,8 +10,8 @@ from app.models import ConsultationReport
 logger = logging.getLogger("rootsafe.agent")
 MAX_AGENT_ITERATIONS = 5
 
-def extract_structured_json(text: str) -> Optional[ConsultationReport]:
-    """Extract and validate ConsultationReport from assistant response."""
+def extract_structured_json(text: str, tool_trace: Optional[List[Dict[str, Any]]] = None) -> Optional[ConsultationReport]:
+    """Extract and validate ConsultationReport from assistant response, with tool_trace grounding."""
     # Look for ```json ... ``` code blocks first
     json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
     candidate_json = None
@@ -35,30 +35,70 @@ def extract_structured_json(text: str) -> Optional[ConsultationReport]:
                 data["summary"] = text[:150]
             if "safe_setback_meters" not in data:
                 data["safe_setback_meters"] = 3.0
-            if "legal_neighbor_risk_notes" not in data:
-                data["legal_neighbor_risk_notes"] = "ควรเว้นระยะร่นตาม ป.พ.พ. 1347"
+            if "neighbor_impact_notes" not in data and "legal_neighbor_risk_notes" not in data:
+                data["neighbor_impact_notes"] = "ระวังกิ่งก้านและระบบรากแผ่ขยายล้ำแนวเขต"
             if "citations" not in data:
                 data["citations"] = []
             return ConsultationReport(**data)
         except Exception as e:
             logger.debug(f"JSON parsing error: {e}")
             
+    # Ground fallback with deterministic tool execution trace if available
+    tool_verdict = None
+    tool_hazard_score = None
+    tool_setback = None
+    tool_citations = []
+    tool_neighbor_impact = "ระวังกิ่งก้านและระบบรากแผ่ขยายล้ำแนวเขต"
+    
+    if tool_trace:
+        for t in tool_trace:
+            res = t.get("result", {})
+            if isinstance(res, dict):
+                if "verdict" in res:
+                    tool_verdict = res["verdict"]
+                if "hazard_score" in res:
+                    tool_hazard_score = res["hazard_score"]
+                if "safe_setback_meters" in res:
+                    tool_setback = res["safe_setback_meters"]
+                if "citations" in res:
+                    tool_citations.extend(res["citations"])
+                if "neighbor_impact" in res:
+                    tool_neighbor_impact = res["neighbor_impact"]
+                elif "legal_neighbor_risk" in res:
+                    tool_neighbor_impact = res["legal_neighbor_risk"]
+
     # Heuristic fallback if model didn't format strict JSON
-    verdict = "WARNING"
     text_lower = text.lower()
-    if "ห้ามปลูก" in text or "prohibited" in text_lower or "อันตราย" in text:
+    if tool_verdict:
+        verdict = tool_verdict
+    elif "ห้ามปลูก" in text or "prohibited" in text_lower or "อันตราย" in text:
         verdict = "PROHIBITED"
     elif "ปลอดภัย" in text or "safe" in text_lower:
         verdict = "SAFE"
+    else:
+        verdict = "WARNING"
         
     citations = re.findall(r"\[Doc:\s*[^\]]+\]", text)
+    if not citations and tool_citations:
+        citations = list(dict.fromkeys(tool_citations))
+        
+    hazard_score = tool_hazard_score if tool_hazard_score is not None else (
+        8 if verdict == "PROHIBITED" else (3 if verdict == "SAFE" else 6)
+    )
+    safe_setback = tool_setback if tool_setback is not None else (
+        4.0 if verdict == "PROHIBITED" else 1.5
+    )
+    summary_text = text[:200].replace("\n", " ").strip()
+    if not summary_text:
+        summary_text = f"ผลการประเมินรุกขกรรม: {verdict} (แนะนำระยะร่นปลอดภัยอย่างน้อย {safe_setback} เมตร)"
+        
     return ConsultationReport(
         verdict=verdict,
-        hazard_score=8 if verdict == "PROHIBITED" else (3 if verdict == "SAFE" else 6),
-        summary=text[:200].replace("\n", " ") + "...",
+        hazard_score=hazard_score,
+        summary=summary_text,
         recommended_trees=["โมก", "แก้ว", "ลีลาวดี"] if verdict == "PROHIBITED" else [],
-        safe_setback_meters=4.0 if verdict == "PROHIBITED" else 1.5,
-        legal_neighbor_risk_notes="ระวังกิ่งก้านและระบบรากล้ำแนวรั้วตาม ป.พ.พ. 1347",
+        safe_setback_meters=safe_setback,
+        neighbor_impact_notes=tool_neighbor_impact,
         citations=citations if citations else ["[Doc: General Arboriculture]"]
     )
 
@@ -114,11 +154,10 @@ def run_agent(
                 except Exception:
                     fn_args = {}
                     
-                tool_trace.append({"tool": fn_name, "args": fn_args})
-                logger.info(f"[Iteration {iteration+1}] Calling tool: {fn_name} with {fn_args}")
-                
                 # Execute tool
                 tool_result = dispatch_tool(fn_name, fn_args)
+                tool_trace.append({"tool": fn_name, "args": fn_args, "result": tool_result})
+                logger.info(f"[Iteration {iteration+1}] Calling tool: {fn_name} with {fn_args}")
                 
                 # Append tool result to context
                 messages.append({
@@ -129,7 +168,7 @@ def run_agent(
         else:
             # Assistant provided a final answer
             final_text = message.content or ""
-            structured_data = extract_structured_json(final_text)
+            structured_data = extract_structured_json(final_text, tool_trace)
             return {
                 "reply": final_text,
                 "tool_trace": tool_trace,
@@ -142,7 +181,7 @@ def run_agent(
     return {
         "reply": fallback_text,
         "tool_trace": tool_trace,
-        "structured": extract_structured_json(fallback_text).model_dump(),
+        "structured": extract_structured_json(fallback_text, tool_trace).model_dump(),
         "iterations": MAX_AGENT_ITERATIONS
     }
 
@@ -163,6 +202,7 @@ async def stream_agent(
                 messages.append({"role": role, "content": content})
                 
     messages.append({"role": "user", "content": user_message})
+    tool_trace = []
     
     yield f"data: {json.dumps({'type': 'status', 'content': 'กำลังวิเคราะห์ข้อกำหนดพื้นที่และความปลอดภัย...'}, ensure_ascii=False)}\n\n"
     
@@ -199,6 +239,7 @@ async def stream_agent(
                 yield f"data: {json.dumps({'type': 'tool_call', 'tool': fn_name, 'label': tool_label, 'args': fn_args}, ensure_ascii=False)}\n\n"
                 
                 tool_result = dispatch_tool(fn_name, fn_args)
+                tool_trace.append({"tool": fn_name, "args": fn_args, "result": tool_result})
                 
                 yield f"data: {json.dumps({'type': 'tool_result', 'tool': fn_name, 'result': tool_result}, ensure_ascii=False)}\n\n"
                 
@@ -215,8 +256,8 @@ async def stream_agent(
                 chunk = final_text[i:i+chunk_size]
                 yield f"data: {json.dumps({'type': 'token', 'token': chunk}, ensure_ascii=False)}\n\n"
                 
-            structured_data = extract_structured_json(final_text)
+            structured_data = extract_structured_json(final_text, tool_trace)
             yield f"data: {json.dumps({'type': 'done', 'structured': structured_data.model_dump() if structured_data else None}, ensure_ascii=False)}\n\n"
             return
             
-    yield f"data: {json.dumps({'type': 'done', 'structured': None}, ensure_ascii=False)}\n\n"
+    yield f"data: {json.dumps({'type': 'done', 'structured': extract_structured_json(fallback_text, tool_trace).model_dump()}, ensure_ascii=False)}\n\n"

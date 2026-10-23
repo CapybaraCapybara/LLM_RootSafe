@@ -26,7 +26,7 @@ def build_tree_document(tree: Dict[str, Any]) -> str:
         f"แสงแดด: {tree['sunlight']} | การผลัดใบ: {tree['leaf_shedding']} | ความเป็นพิษ: {pet_status}\n"
         f"การดูแลรักษา: {tree['maintenance_level']} | การใช้งาน: {tree['architectural_use']}\n"
         f"พฤติกรรมและความเสี่ยงของระบบราก: {tree['root_risk_description']}\n"
-        f"ความเสี่ยงเพื่อนบ้านและข้อกฎหมาย (ป.พ.พ. 1347): {tree['legal_neighbor_risk']}\n"
+        f"ข้อควรระวังต่อพื้นที่ข้างเคียง (กิ่ง/ใบ/ราก): {tree['legal_neighbor_risk']}\n"
         f"การปลูกและสภาพดิน: {tree['care_and_soil']}"
     )
 
