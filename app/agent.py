@@ -155,7 +155,7 @@ def run_agent(
                     fn_args = {}
                     
                 # Execute tool
-                tool_result = dispatch_tool(fn_name, fn_args)
+                tool_result = dispatch_tool(fn_name, fn_args, min_score=min_score)
                 tool_trace.append({"tool": fn_name, "args": fn_args, "result": tool_result})
                 logger.info(f"[Iteration {iteration+1}] Calling tool: {fn_name} with {fn_args}")
                 
@@ -191,7 +191,7 @@ async def stream_agent(
     temperature: float = 0.0,
     min_score: Optional[float] = None
 ) -> AsyncGenerator[str, None]:
-    """SSE streaming generator yielding live events, tool execution traces, and tokens."""
+    """SSE streaming generator yielding live events, tool execution traces, and real-time tokens."""
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     
     if history:
@@ -203,61 +203,102 @@ async def stream_agent(
                 
     messages.append({"role": "user", "content": user_message})
     tool_trace = []
+    total_accumulated_text = ""
     
     yield f"data: {json.dumps({'type': 'status', 'content': 'กำลังวิเคราะห์ข้อกำหนดพื้นที่และความปลอดภัย...'}, ensure_ascii=False)}\n\n"
     
     for iteration in range(MAX_AGENT_ITERATIONS):
         try:
-            response = client.chat.completions.create(
+            stream_resp = client.chat.completions.create(
                 model=MODEL,
                 messages=messages,
                 tools=TOOLS_SPEC,
-                temperature=temperature
+                temperature=temperature,
+                stream=True
             )
         except Exception as e:
+            logger.error(f"LLM streaming error: {e}")
             yield f"data: {json.dumps({'type': 'error', 'content': f'Upstream error: {str(e)}'}, ensure_ascii=False)}\n\n"
             return
             
-        choice = response.choices[0]
-        message = choice.message
+        tool_calls_dict = {}
+        iteration_content = ""
         
-        if message.tool_calls:
-            messages.append(message)
-            for tool_call in message.tool_calls:
-                fn_name = tool_call.function.name
+        for chunk in stream_resp:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            
+            # Stream tokens live as they arrive from the LLM
+            if delta.content:
+                iteration_content += delta.content
+                yield f"data: {json.dumps({'type': 'token', 'token': delta.content}, ensure_ascii=False)}\n\n"
+                
+            # Accumulate streaming tool call deltas
+            if delta.tool_calls:
+                for tc in delta.tool_calls:
+                    idx = tc.index
+                    if idx not in tool_calls_dict:
+                        tool_calls_dict[idx] = {"id": tc.id or "", "name": "", "arguments": ""}
+                    if tc.id:
+                        tool_calls_dict[idx]["id"] = tc.id
+                    if tc.function and tc.function.name:
+                        tool_calls_dict[idx]["name"] += tc.function.name
+                    if tc.function and tc.function.arguments:
+                        tool_calls_dict[idx]["arguments"] += tc.function.arguments
+
+        if iteration_content:
+            total_accumulated_text += iteration_content
+
+        if tool_calls_dict:
+            formatted_tool_calls = []
+            for tc in tool_calls_dict.values():
+                formatted_tool_calls.append({
+                    "id": tc["id"],
+                    "type": "function",
+                    "function": {"name": tc["name"], "arguments": tc["arguments"]}
+                })
+                
+            messages.append({
+                "role": "assistant",
+                "content": iteration_content if iteration_content else None,
+                "tool_calls": formatted_tool_calls
+            })
+            
+            for tc in tool_calls_dict.values():
+                fn_name = tc["name"]
                 try:
-                    fn_args = json.loads(tool_call.function.arguments)
+                    fn_args = json.loads(tc["arguments"])
                 except Exception:
                     fn_args = {}
                     
                 tool_label = {
-                    "evaluate_root_hazard": "กำลังคำนวณระยะร่นและแรงดันระบบราก",
-                    "search_trees_by_criteria": "กำลังค้นหาพันธุ์ไม้ตามขนาดพื้นที่และแดด",
-                    "search_tree_knowledge": "กำลังค้นคว้าเอกสารรุกขกรรมพรรณไม้ (RAG)"
+                    "evaluate_root_hazard": "คำนวณระยะร่นและแรงดันระบบราก",
+                    "search_trees_by_criteria": "ค้นหาพันธุ์ไม้ตามขนาดพื้นที่และแดด",
+                    "search_tree_knowledge": "ค้นคว้าเอกสารรุกขกรรมพรรณไม้ (RAG)"
                 }.get(fn_name, fn_name)
                 
                 yield f"data: {json.dumps({'type': 'tool_call', 'tool': fn_name, 'label': tool_label, 'args': fn_args}, ensure_ascii=False)}\n\n"
                 
-                tool_result = dispatch_tool(fn_name, fn_args)
+                tool_result = dispatch_tool(fn_name, fn_args, min_score=min_score)
                 tool_trace.append({"tool": fn_name, "args": fn_args, "result": tool_result})
                 
-                yield f"data: {json.dumps({'type': 'tool_result', 'tool': fn_name, 'result': tool_result}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'tool_result', 'tool': fn_name, 'label': tool_label, 'result': tool_result}, ensure_ascii=False)}\n\n"
                 
                 messages.append({
                     "role": "tool",
-                    "tool_call_id": tool_call.id,
+                    "tool_call_id": tc["id"],
                     "content": json.dumps(tool_result, ensure_ascii=False)
                 })
-        else:
-            final_text = message.content or ""
-            # Stream final tokens or text chunks
-            chunk_size = 20
-            for i in range(0, len(final_text), chunk_size):
-                chunk = final_text[i:i+chunk_size]
-                yield f"data: {json.dumps({'type': 'token', 'token': chunk}, ensure_ascii=False)}\n\n"
                 
-            structured_data = extract_structured_json(final_text, tool_trace)
+            yield f"data: {json.dumps({'type': 'status', 'content': 'กำลังประมวลผลคำแนะนำรุกขกรรม...'}, ensure_ascii=False)}\n\n"
+        else:
+            # Final text generated directly
+            structured_data = extract_structured_json(total_accumulated_text, tool_trace)
             yield f"data: {json.dumps({'type': 'done', 'structured': structured_data.model_dump() if structured_data else None}, ensure_ascii=False)}\n\n"
             return
             
-    yield f"data: {json.dumps({'type': 'done', 'structured': extract_structured_json(fallback_text, tool_trace).model_dump()}, ensure_ascii=False)}\n\n"
+    # Max iterations exceeded fallback
+    fallback_text = "การประเมินใช้จำนวนรอบเกินกำหนด สรุปเบื้องต้น: ควรเว้นระยะร่นอย่างน้อย 4 เมตรจากโครงสร้างเพื่อความปลอดภัย"
+    structured_data = extract_structured_json(fallback_text, tool_trace)
+    yield f"data: {json.dumps({'type': 'done', 'structured': structured_data.model_dump() if structured_data else None}, ensure_ascii=False)}\n\n"
