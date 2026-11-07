@@ -1,0 +1,53 @@
+{
+  "timestamp": "2026-11-07 15:32:10",
+  "model": "gemma-4-E4B-it",
+  "total_test_cases": 30,
+  "baseline_metrics": {
+    "overall_accuracy": 36.67,
+    "hazard_avoidance_rate": 0.0,
+    "citation_rate": 0.0,
+    "danger_detected": "0/10"
+  },
+  "agent_metrics": {
+    "overall_accuracy": 76.67,
+    "hazard_avoidance_rate": 100.0,
+    "citation_rate": 100.0,
+    "danger_detected": "10/10"
+  },
+  "measured_improvement_hazard_avoidance": "+100.0%",
+  "measured_improvement_overall_accuracy": "+40.0%",
+  "ablation_min_score": {
+    "0.0": {
+      "min_score": 0.0,
+      "precision_at_3": 33.3,
+      "recall_at_3": 100.0,
+      "f1_at_3": 50.0,
+      "retrieval_relevance_pct": 50.0,
+      "comment": "Too noisy (retrieves irrelevant trees without filtering, low precision)"
+    },
+    "0.35": {
+      "min_score": 0.35,
+      "precision_at_3": 100.0,
+      "recall_at_3": 100.0,
+      "f1_at_3": 100.0,
+      "retrieval_relevance_pct": 100.0,
+      "comment": "Optimal balance (clear signal, filters noise, 100% precision & recall)"
+    },
+    "0.70": {
+      "min_score": 0.7,
+      "precision_at_3": 100.0,
+      "recall_at_3": 60.0,
+      "f1_at_3": 75.0,
+      "retrieval_relevance_pct": 75.0,
+      "comment": "Too strict (over-filters alias queries, recall drops to 60.0%)"
+    },
+    "0.7": {
+      "min_score": 0.7,
+      "precision_at_3": 100.0,
+      "recall_at_3": 60.0,
+      "f1_at_3": 75.0,
+      "retrieval_relevance_pct": 75.0,
+      "comment": "Too strict (over-filters alias queries, recall drops to 60.0%)"
+    }
+  }
+}

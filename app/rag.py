@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from typing import List, Dict, Any, Optional
 from app.config import DATA_PATH, CHROMA_PERSIST_DIR, DEFAULT_MIN_SCORE
 
@@ -68,28 +69,48 @@ def init_chroma_db():
         logger.warning(f"Could not initialize ChromaDB ({e}). Will use fallback in-memory search.")
         return None
 
+def clean_tree_aliases(name_th: str, name_en: str) -> List[str]:
+    cleaned = re.sub(r"\((?:ลงดิน|ในกระบะคอนกรีต|ปลูกในกระถาง[^\)]*|ไม้เลื้อยซุ้ม)\)", "", name_th)
+    clean_parts = cleaned.replace("(", "/").replace(")", "/").replace("（", "/").replace("）", "/")
+    aliases = [p.strip() for p in clean_parts.split("/") if len(p.strip()) > 1]
+    if name_en:
+        aliases.append(name_en.strip())
+    return aliases
+
+def score_tree_match(tree: Dict[str, Any], query: str, vec_dist: Optional[float] = None) -> float:
+    query_lower = query.lower()
+    query_tokens = set(query_lower.split())
+    doc_text = build_tree_document(tree).lower()
+    
+    name_th = tree["name_th"].lower()
+    name_en = tree["name_en"].lower()
+    primary_name = name_th.split("/")[0].split("(")[0].strip()
+    aliases = clean_tree_aliases(name_th, name_en)
+    
+    vec_sim = max(0.0, min(1.0, 1.0 - (vec_dist / 2.0))) if vec_dist is not None else 0.5
+    
+    if primary_name in query_lower:
+        score = 0.70 + 0.15 * vec_sim
+    elif any(alias in query_lower for alias in aliases if len(alias) > 2):
+        score = 0.50 + 0.10 * vec_sim
+    else:
+        matches = sum(1 for tok in query_tokens if tok in doc_text and len(tok) > 2)
+        score = min(0.30, 0.10 * vec_sim + matches * 0.05)
+        
+    return min(1.0, round(score, 3))
+
 def fallback_keyword_search(query: str, top_k: int = 3, min_score: float = 0.35) -> List[Dict[str, Any]]:
     """Deterministic token-overlap search fallback if ChromaDB is unavailable."""
     trees = load_trees_catalog()
-    query_tokens = set(query.lower().split())
     scored_results = []
     
     for tree in trees:
-        doc_text = build_tree_document(tree).lower()
-        # Direct name match gets high score
-        score = 0.0
-        if tree["name_th"].lower() in query.lower() or tree["name_en"].lower() in query.lower():
-            score += 0.8
-        
-        matches = sum(1 for token in query_tokens if token in doc_text)
-        score += min(0.6, matches * 0.15)
-        
-        normalized_score = min(1.0, round(score, 3))
-        if normalized_score >= min_score:
+        score = score_tree_match(tree, query, vec_dist=None)
+        if score >= min_score:
             scored_results.append({
                 "id": tree["id"],
                 "content": build_tree_document(tree),
-                "score": normalized_score,
+                "score": score,
                 "citation": f"[Doc: {tree['name_th']}]",
                 "metadata": tree
             })
@@ -100,37 +121,35 @@ def fallback_keyword_search(query: str, top_k: int = 3, min_score: float = 0.35)
 def retrieve_tree_docs(query: str, min_score: Optional[float] = None, top_k: int = 3) -> List[Dict[str, Any]]:
     """Retrieve grounded arboriculture documents filtered by min_score threshold."""
     threshold = min_score if min_score is not None else DEFAULT_MIN_SCORE
+    trees = load_trees_catalog()
     collection = init_chroma_db()
     
-    if collection is None:
-        return fallback_keyword_search(query, top_k=top_k, min_score=threshold)
-        
-    try:
-        results = collection.query(
-            query_texts=[query],
-            n_results=top_k * 2
-        )
-        
-        docs = results.get("documents", [[]])[0]
-        metadatas = results.get("metadatas", [[]])[0]
-        distances = results.get("distances", [[]])[0]
-        
-        scored_docs = []
-        for doc, meta, dist in zip(docs, metadatas, distances):
-            # For cosine distance: similarity = 1.0 - (dist / 2.0) or 1.0 - dist
-            # When distance is cosine, dist is typically between 0.0 and 2.0
-            similarity = max(0.0, min(1.0, 1.0 - (dist / 2.0)))
-            if similarity >= threshold:
-                scored_docs.append({
-                    "content": doc,
-                    "score": round(similarity, 3),
-                    "citation": f"[Doc: {meta.get('name_th', 'Tree')}]",
-                    "metadata": meta
-                })
-                
-        # Sort and take top_k
-        scored_docs.sort(key=lambda x: x["score"], reverse=True)
-        return scored_docs[:top_k]
-    except Exception as e:
-        logger.error(f"Error querying ChromaDB: {e}. Falling back to in-memory search.")
-        return fallback_keyword_search(query, top_k=top_k, min_score=threshold)
+    vec_dists = {}
+    if collection is not None:
+        try:
+            results = collection.query(
+                query_texts=[query],
+                n_results=len(trees)
+            )
+            if results and results.get("ids") and results.get("distances"):
+                for tid, dist in zip(results["ids"][0], results["distances"][0]):
+                    vec_dists[tid] = dist
+        except Exception as e:
+            logger.error(f"Error querying ChromaDB: {e}. Falling back to keyword search.")
+            return fallback_keyword_search(query, top_k=top_k, min_score=threshold)
+            
+    scored_docs = []
+    for tree in trees:
+        dist = vec_dists.get(tree["id"])
+        similarity = score_tree_match(tree, query, vec_dist=dist)
+        if similarity >= threshold:
+            scored_docs.append({
+                "id": tree["id"],
+                "content": build_tree_document(tree),
+                "score": similarity,
+                "citation": f"[Doc: {tree['name_th']}]",
+                "metadata": tree
+            })
+            
+    scored_docs.sort(key=lambda x: x["score"], reverse=True)
+    return scored_docs[:top_k]

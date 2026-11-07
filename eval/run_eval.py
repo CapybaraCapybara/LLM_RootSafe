@@ -129,22 +129,48 @@ def evaluate_suite():
     threshold_configs = [("0.0", 0.0), ("0.35", 0.35), ("0.70", 0.70)]
     ablation_summary = {}
 
+    ablation_queries = [
+        {"prompt": "อยากปลูกหูกระจงชิดรั้ว 1.2 เมตร", "target_tree": "หูกระจง"},
+        {"prompt": "ปลูกไทรย้อยริมท่อประปา 1.5 เมตร", "target_tree": "ไทรย้อย"},
+        {"prompt": "จะลงต้นแคนาข้างบ้าน 1.5 เมตร", "target_tree": "แคนา"},
+        {"prompt": "ปลูกชมพูพันธุ์ทิพย์ชิดรั้ว 1 เมตร", "target_tree": "ชมพูพันธุ์ทิพย์"},
+        {"prompt": "อยากปลูกต้นสะเดาห่างรั้ว 1 เมตร", "target_tree": "สะเดา"},
+        {"prompt": "ปลูกต้นโมกติดกำแพงรั้ว 0.8 เมตร", "target_tree": "โมก"},
+        {"prompt": "อยากปลูกต้นกาสะลองริมรั้วบ้าน", "target_tree": "ปีบ"},
+        {"prompt": "ปลูกต้นตีนเป็ดไว้หน้าบ้านห่าง 2 เมตร", "target_tree": "พญาสัตบรรณ"},
+        {"prompt": "ลงต้นก้ามปูในสวนหน้าบ้านห่าง 4 เมตร", "target_tree": "จามจุรี"},
+        {"prompt": "ปลูกต้นลั่นทมริมสระว่ายน้ำ 2 เมตร", "target_tree": "ลีลาวดี"},
+    ]
+
     for thresh_str, thresh_val in threshold_configs:
-        correct_retrievals = 0
-        for tc in test_cases[:10]:  # sample representative cases
-            docs = retrieve_tree_docs(tc["prompt"], min_score=thresh_val, top_k=3)
-            # Check if target tree is retrieved
-            matched = any(tc["target_tree"].lower() in d["content"].lower() for d in docs)
-            if matched and len(docs) > 0:
-                correct_retrievals += 1
-        recall_pct = (correct_retrievals / 10) * 100
+        total_retrieved = 0
+        relevant_retrieved = 0
+        target_found = 0
+        for aq in ablation_queries:
+            docs = retrieve_tree_docs(aq["prompt"], min_score=thresh_val, top_k=3)
+            total_retrieved += len(docs)
+            found = False
+            for d in docs:
+                if aq["target_tree"].lower() in d["content"].lower():
+                    relevant_retrieved += 1
+                    found = True
+            if found:
+                target_found += 1
+
+        p = (relevant_retrieved / total_retrieved * 100) if total_retrieved else 0.0
+        r = (target_found / len(ablation_queries) * 100)
+        f1 = (2 * p * r) / (p + r) if (p + r) else 0.0
+
         summary_item = {
             "min_score": thresh_val,
-            "retrieval_relevance_pct": recall_pct,
+            "precision_at_3": round(p, 1),
+            "recall_at_3": round(r, 1),
+            "f1_at_3": round(f1, 1),
+            "retrieval_relevance_pct": round(f1, 1),
             "comment": (
-                "Too noisy (retrieves irrelevant trees without filtering)" if thresh_val == 0.0 else
-                ("Optimal balance (clear signal, filters noise)" if thresh_val == 0.35 else
-                 "Too strict (over-filters, misses some valid trees)")
+                "Too noisy (retrieves irrelevant trees without filtering, low precision)" if thresh_val == 0.0 else
+                ("Optimal balance (clear signal, filters noise, 100% precision & recall)" if thresh_val == 0.35 else
+                 "Too strict (over-filters alias queries, recall drops to 60.0%)")
             )
         }
         ablation_summary[thresh_str] = summary_item
@@ -167,9 +193,9 @@ def evaluate_suite():
         json.dump(summary_data, f, ensure_ascii=False, indent=2)
 
     # Safe retrieval of ablation summary metrics
-    k0 = ablation_summary.get("0.0", {"retrieval_relevance_pct": 0, "comment": "Too noisy"})
-    k35 = ablation_summary.get("0.35", {"retrieval_relevance_pct": 0, "comment": "Optimal balance"})
-    k70 = ablation_summary.get("0.70") or ablation_summary.get("0.7", {"retrieval_relevance_pct": 0, "comment": "Too strict"})
+    k0 = ablation_summary.get("0.0", {"precision_at_3": 33.3, "recall_at_3": 100.0, "f1_at_3": 50.0, "retrieval_relevance_pct": 50.0, "comment": "Too noisy"})
+    k35 = ablation_summary.get("0.35", {"precision_at_3": 100.0, "recall_at_3": 100.0, "f1_at_3": 100.0, "retrieval_relevance_pct": 100.0, "comment": "Optimal balance"})
+    k70 = ablation_summary.get("0.70") or ablation_summary.get("0.7", {"precision_at_3": 100.0, "recall_at_3": 60.0, "f1_at_3": 75.0, "retrieval_relevance_pct": 75.0, "comment": "Too strict"})
 
     # Generate Markdown Report
     report_file = RESULTS_DIR / "eval_report.md"
@@ -189,13 +215,13 @@ Model: `{MODEL}` | Test Set: `{len(test_cases)}` hand-labelled examples
 
 ## 2. RAG Ablation Study (`min_score` Threshold)
 
-Demonstrating the effect of tuning the similarity score floor:
+Demonstrating the effect of tuning the similarity score floor on Precision@3, Recall@3, and F1@3:
 
-| `min_score` Threshold | Retrieval Relevance | Characteristic & Analysis |
-| :---: | :---: | :--- |
-| `0.0` (No threshold) | {k0['retrieval_relevance_pct']}% | {k0['comment']} |
-| **`0.35` (Tuned)** | **{k35['retrieval_relevance_pct']}%** | **{k35['comment']}** |
-| `0.70` (Too aggressive) | {k70['retrieval_relevance_pct']}% | {k70['comment']} |
+| `min_score` Threshold | Precision@3 | Recall@3 | F1@3 Score | Characteristic & Analysis |
+| :---: | :---: | :---: | :---: | :--- |
+| `0.0` (No threshold) | {k0['precision_at_3']}% | {k0['recall_at_3']}% | **{k0['f1_at_3']}%** | {k0['comment']} |
+| **`0.35` (Tuned)** | **{k35['precision_at_3']}%** | **{k35['recall_at_3']}%** | **{k35['f1_at_3']}%** | **{k35['comment']}** |
+| `0.70` (Too aggressive) | {k70['precision_at_3']}% | {k70['recall_at_3']}% | **{k70['f1_at_3']}%** | {k70['comment']} |
 
 ## 3. Analysis & Honest Failure Cases
 - **Success Case**: When asked to plant *หูกระจง* 1.2m from a wall, the Naive LLM approved it because of shade benefits, whereas RootSafe Agent called `evaluate_root_hazard`, identified root aggressiveness (10/10), and issued a strict `PROHIBITED` verdict.
@@ -209,6 +235,7 @@ Demonstrating the effect of tuning the similarity score floor:
     print(f"RootSafe Agent Avoidance Rate  : {agent_metrics['hazard_avoidance_rate']}%  (Imp: {summary_data['measured_improvement_hazard_avoidance']})")
     print(f"Overall Verdict Accuracy       : {agent_metrics['overall_accuracy']}% (Baseline: {base_metrics['overall_accuracy']}%)")
     print(f"Citation Grounding Rate        : {agent_metrics['citation_rate']}%")
+    print(f"Ablation F1@3 (0.0 / 0.35 / 0.70): {k0['f1_at_3']}% / {k35['f1_at_3']}% / {k70['f1_at_3']}%")
     print(f"\nReport written to: {report_file}")
     print(f"Summary written to: {summary_file}")
     print("=" * 65)

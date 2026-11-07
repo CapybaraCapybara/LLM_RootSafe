@@ -1,6 +1,7 @@
 import json
 import logging
-from typing import Dict, Any, List
+import re
+from typing import Dict, Any, List, Optional
 from app.models import RootHazardArgs, TreeFilterArgs, TreeKnowledgeArgs
 from app.rag import load_trees_catalog, retrieve_tree_docs
 
