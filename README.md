@@ -96,8 +96,8 @@
 
 ### 1. Clone & ติดตั้ง Dependencies
 ```bash
-git clone https://github.com/your-username/rootsafe-arborist.git
-cd rootsafe-arborist
+git clone https://github.com/CapybaraCapybara/LLM_RootSafe.git
+cd LLM_RootSafe
 
 # สร้าง Virtual Environment
 python -m venv .venv
@@ -118,7 +118,7 @@ cp .env.example .env
 ตรวจสอบเนื้อหาในไฟล์ `.env`:
 ```ini
 OPENAI_API_KEY="sk-your-class-proxy-key"
-OPENAI_BASE_URL="BASE_URL"
+OPENAI_BASE_URL="https://llm.nat-d.uk/v1"
 MODEL="gemma-4-E4B-it"
 RAG_MIN_SCORE=0.35
 ```
