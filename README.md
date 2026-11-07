@@ -15,7 +15,7 @@
 
 เจ้าของบ้าน สถาปนิก และนักจัดสวนในประเทศไทย มักประสบปัญหา **"ปลูกต้นไม้ผิด ชีวิตเปลี่ยน"** เช่น:
 1. ปลูกต้นไม้ที่มี **ระบบรากชอนไชก้าวร้าว (Aggressive surface roots)** เช่น *หูกระจง, ไทร, พญาสัตบรรณ (ตีนเป็ด), แคนา* ชิดตัวบ้านหรือกำแพงรั้ว ทำให้คานคอดิน ฐานราก ท่อระบายน้ำ และรั้วแตกร้าวทรุดตัว
-2. ข้อพิพาททางกฎหมายกับเพื่อนบ้านตาม **ป.พ.พ. มาตรา 1347** เรื่องรากไม้และกิ่งไม้รุกล้ำ หรือผลัดใบร่วงอุดตันท่อระบายน้ำ
+2. ผลกระทบและข้อพิพาทกับเพื่อนบ้าน เช่น ระบบรากไม้ดันแนวกำแพงรั้ว กิ่งไม้รุกล้ำ หรือผลัดใบร่วงอุดตันท่อระบายน้ำ
 
 เมื่อถาม LLM ทั่วไป (Naive LLM) โมเดลมักจะตอบเอาใจผู้ใช้ เช่น แนะนำให้ปลูกหูกระจงเพราะ "ให้ร่มเงาสวยงาม" โดยละเลยสูตรคำนวณระยะร่นและความปลอดภัยของโครงสร้าง
 
@@ -76,19 +76,21 @@
 
 | Metric | Baseline (Naive LLM) | RootSafe Agent (Ours) | Measured Improvement |
 | :--- | :---: | :---: | :---: |
-| **Hazard Avoidance Rate** (บล็อกต้นไม้อันตราย 10 เคส) | **30.0%** (3/10) | **100.0%** (10/10) | **+70.0%** 🚀 |
-| **Overall Verdict Accuracy** (ความแม่นยำทุกเคส) | **36.67%** | **93.33%** | **+56.66%** 🚀 |
-| **Citation Grounding Rate** (มีการอ้างอิงเอกสาร) | **0.0%** | **96.67%** | **+96.67%** 🚀 |
+| **Hazard Avoidance Rate** (บล็อกต้นไม้อันตราย 10 เคส) | **0.0%** (0/10) | **100.0%** (10/10) | **+100.0%** 🚀 |
+| **Overall Verdict Accuracy** (ความแม่นยำทุกเคส) | **36.67%** | **76.67%** | **+40.0%** 🚀 |
+| **Citation Grounding Rate** (มีการอ้างอิงเอกสาร) | **0.0%** | **100.0%** | **+100.0%** 🚀 |
 
-> **คำอธิบาย**: Naive LLM ล้มเหลวในการปฏิเสธต้นไม้รากอันตราย (ตอบยอมให้ปลูกหูกระจงชิดรั้ว 1.2 ม.) ในขณะที่ RootSafe Agent เรียก `evaluate_root_hazard` คำนวณอัตราส่วนระยะจริงต่อระยะปลอดภัย และสั่งห้ามปลูก (**PROHIBITED**) ได้ถูกต้อง 100%
+> **คำอธิบาย**: Naive LLM ล้มเหลวในการปฏิเสธต้นไม้รากอันตราย (ตอบยอมให้ปลูกหูกระจงชิดรั้ว 1.2 ม.) ในขณะที่ RootSafe Agent เรียก `evaluate_root_hazard` คำนวณอัตราส่วนระยะจริงต่อระยะปลอดภัย และสั่งห้ามปลูก (**PROHIBITED**) ได้ถูกต้อง 100% ครบทั้ง 10 เคสอันตราย
 
 ### 2. Ablation Study: การปรับจูน `min_score` Threshold ใน RAG
 
-| `min_score` Threshold | Relevance Score | บทวิเคราะห์ทางวิศวกรรม |
-| :---: | :---: | :--- |
-| `0.0` (ไม่กรอง) | 50.0% | ดึงข้อมูลต้นไม้ที่ไม่เกี่ยวข้องมาปน ทำให้โมเดลสับสน |
-| **`0.35` (Tuned)** | **100.0%** | **จุดสมดุลที่ดีที่สุด** กรองเอกสารรบกวนทิ้งได้อย่างแม่นยำ |
-| `0.70` (เข้มงวดเกินไป) | 60.0% | กรองทิ้งมากเกินไปจนเอกสารที่เกี่ยวข้องหลุดหาย |
+การเปรียบเทียบวัดผลกระทบของการตั้งค่า Threshold ต่อการดึงข้อมูลรุกขกรรม (Precision@3, Recall@3 และ F1@3 Score):
+
+| `min_score` Threshold | Precision@3 | Recall@3 | F1@3 (Relevance) | บทวิเคราะห์ทางวิศวกรรม |
+| :---: | :---: | :---: | :---: | :--- |
+| `0.0` (ไม่กรอง) | 33.3% | 100.0% | **50.0%** | ดึงข้อมูลต้นไม้ที่ไม่เกี่ยวข้องมาปนจนเต็มโควต้า 3 ฉบับ (Noise สูง ทำให้ Precision ต่ำ) |
+| **`0.35` (Tuned)** | **100.0%** | **100.0%** | **100.0%** | **จุดสมดุลที่ดีที่สุด** กรองเอกสารรบกวนทิ้งได้หมดจด และรักษาเอกสารเป้าหมายไว้ได้ 100% |
+| `0.70` (เข้มงวดเกินไป) | 100.0% | 60.0% | **75.0%** | กรองทิ้งมากเกินไปจนเอกสารเป้าหมายที่ค้นด้วยชื่อรอง/ชื่อพื้นเมืองหลุดหาย (Recall ตกเหลือ 60.0%) |
 
 ---
 
@@ -96,8 +98,8 @@
 
 ### 1. Clone & ติดตั้ง Dependencies
 ```bash
-git clone https://github.com/your-username/rootsafe-arborist.git
-cd rootsafe-arborist
+git clone https://github.com/CapybaraCapybara/LLM_RootSafe.git
+cd LLM_RootSafe
 
 # สร้าง Virtual Environment
 python -m venv .venv
@@ -118,7 +120,7 @@ cp .env.example .env
 ตรวจสอบเนื้อหาในไฟล์ `.env`:
 ```ini
 OPENAI_API_KEY="sk-your-class-proxy-key"
-OPENAI_BASE_URL="BASE_URL"
+OPENAI_BASE_URL="https://llm.nat-d.uk/v1"
 MODEL="gemma-4-E4B-it"
 RAG_MIN_SCORE=0.35
 ```
@@ -134,6 +136,9 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 python eval/run_eval.py
 ```
 สคริปต์จะทำการทดสอบทั้ง 30 ข้อ และสร้างรายงานสรุปใน `eval/results/eval_report.md`
+
+### 5. การรันด้วย Docker & การ Deploy ด้วย AWS CloudFront
+ดูขั้นตอนการรัน Container ผ่าน Docker Compose และคู่มือการตั้งค่าสถาปัตยกรรม AWS CloudFront Distribution ได้ที่ [`deploy/aws-cloudfront-guide.md`](deploy/aws-cloudfront-guide.md)
 
 ---
 
@@ -152,7 +157,13 @@ rootsafe-arborist/
 ├── README.md               # รายละเอียดโครงการ วิธีรัน และผลการประเมิน
 ├── .env.example            # ตัวอย่างการตั้งค่า Environment Variables
 ├── .gitignore              # กำหนดไฟล์ที่ไม่ commit (.env, .chroma/, .venv/)
+├── .dockerignore           # กำหนดไฟล์ที่ไม่ copy เข้า Docker Image
+├── Dockerfile              # Production Docker Container Specification
+├── docker-compose.yml      # Local / Staging Container Orchestration
 ├── requirements.txt        # รายการ Dependencies
+│
+├── deploy/
+│   └── aws-cloudfront-guide.md # คู่มือสถาปัตยกรรมและการตั้งค่า AWS CloudFront
 │
 ├── data/
 │   └── trees.json          # คลังข้อมูลพรรณไม้ 42 ชนิด (Raw Corpus)

@@ -1,0 +1,13 @@
+.git
+.gitignore
+.venv
+venv
+__pycache__
+*.pyc
+.chroma
+.env
+eval/results
+.agents
+.agent
+*.log
+v

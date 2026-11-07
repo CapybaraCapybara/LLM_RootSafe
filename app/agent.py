@@ -10,8 +10,8 @@ from app.models import ConsultationReport
 logger = logging.getLogger("rootsafe.agent")
 MAX_AGENT_ITERATIONS = 5
 
-def extract_structured_json(text: str) -> Optional[ConsultationReport]:
-    """Extract and validate ConsultationReport from assistant response."""
+def extract_structured_json(text: str, tool_trace: Optional[List[Dict[str, Any]]] = None) -> Optional[ConsultationReport]:
+    """Extract and validate ConsultationReport from assistant response, with tool_trace grounding."""
     # Look for ```json ... ``` code blocks first
     json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
     candidate_json = None
@@ -35,30 +35,70 @@ def extract_structured_json(text: str) -> Optional[ConsultationReport]:
                 data["summary"] = text[:150]
             if "safe_setback_meters" not in data:
                 data["safe_setback_meters"] = 3.0
-            if "legal_neighbor_risk_notes" not in data:
-                data["legal_neighbor_risk_notes"] = "ควรเว้นระยะร่นตาม ป.พ.พ. 1347"
+            if "neighbor_impact_notes" not in data and "legal_neighbor_risk_notes" not in data:
+                data["neighbor_impact_notes"] = "ระวังกิ่งก้านและระบบรากแผ่ขยายล้ำแนวเขต"
             if "citations" not in data:
                 data["citations"] = []
             return ConsultationReport(**data)
         except Exception as e:
             logger.debug(f"JSON parsing error: {e}")
             
+    # Ground fallback with deterministic tool execution trace if available
+    tool_verdict = None
+    tool_hazard_score = None
+    tool_setback = None
+    tool_citations = []
+    tool_neighbor_impact = "ระวังกิ่งก้านและระบบรากแผ่ขยายล้ำแนวเขต"
+    
+    if tool_trace:
+        for t in tool_trace:
+            res = t.get("result", {})
+            if isinstance(res, dict):
+                if "verdict" in res:
+                    tool_verdict = res["verdict"]
+                if "hazard_score" in res:
+                    tool_hazard_score = res["hazard_score"]
+                if "safe_setback_meters" in res:
+                    tool_setback = res["safe_setback_meters"]
+                if "citations" in res:
+                    tool_citations.extend(res["citations"])
+                if "neighbor_impact" in res:
+                    tool_neighbor_impact = res["neighbor_impact"]
+                elif "legal_neighbor_risk" in res:
+                    tool_neighbor_impact = res["legal_neighbor_risk"]
+
     # Heuristic fallback if model didn't format strict JSON
-    verdict = "WARNING"
     text_lower = text.lower()
-    if "ห้ามปลูก" in text or "prohibited" in text_lower or "อันตราย" in text:
+    if tool_verdict:
+        verdict = tool_verdict
+    elif "ห้ามปลูก" in text or "prohibited" in text_lower or "อันตราย" in text:
         verdict = "PROHIBITED"
     elif "ปลอดภัย" in text or "safe" in text_lower:
         verdict = "SAFE"
+    else:
+        verdict = "WARNING"
         
     citations = re.findall(r"\[Doc:\s*[^\]]+\]", text)
+    if not citations and tool_citations:
+        citations = list(dict.fromkeys(tool_citations))
+        
+    hazard_score = tool_hazard_score if tool_hazard_score is not None else (
+        8 if verdict == "PROHIBITED" else (3 if verdict == "SAFE" else 6)
+    )
+    safe_setback = tool_setback if tool_setback is not None else (
+        4.0 if verdict == "PROHIBITED" else 1.5
+    )
+    summary_text = text[:200].replace("\n", " ").strip()
+    if not summary_text:
+        summary_text = f"ผลการประเมินรุกขกรรม: {verdict} (แนะนำระยะร่นปลอดภัยอย่างน้อย {safe_setback} เมตร)"
+        
     return ConsultationReport(
         verdict=verdict,
-        hazard_score=8 if verdict == "PROHIBITED" else (3 if verdict == "SAFE" else 6),
-        summary=text[:200].replace("\n", " ") + "...",
+        hazard_score=hazard_score,
+        summary=summary_text,
         recommended_trees=["โมก", "แก้ว", "ลีลาวดี"] if verdict == "PROHIBITED" else [],
-        safe_setback_meters=4.0 if verdict == "PROHIBITED" else 1.5,
-        legal_neighbor_risk_notes="ระวังกิ่งก้านและระบบรากล้ำแนวรั้วตาม ป.พ.พ. 1347",
+        safe_setback_meters=safe_setback,
+        neighbor_impact_notes=tool_neighbor_impact,
         citations=citations if citations else ["[Doc: General Arboriculture]"]
     )
 
@@ -114,11 +154,10 @@ def run_agent(
                 except Exception:
                     fn_args = {}
                     
-                tool_trace.append({"tool": fn_name, "args": fn_args})
-                logger.info(f"[Iteration {iteration+1}] Calling tool: {fn_name} with {fn_args}")
-                
                 # Execute tool
-                tool_result = dispatch_tool(fn_name, fn_args)
+                tool_result = dispatch_tool(fn_name, fn_args, min_score=min_score)
+                tool_trace.append({"tool": fn_name, "args": fn_args, "result": tool_result})
+                logger.info(f"[Iteration {iteration+1}] Calling tool: {fn_name} with {fn_args}")
                 
                 # Append tool result to context
                 messages.append({
@@ -129,7 +168,7 @@ def run_agent(
         else:
             # Assistant provided a final answer
             final_text = message.content or ""
-            structured_data = extract_structured_json(final_text)
+            structured_data = extract_structured_json(final_text, tool_trace)
             return {
                 "reply": final_text,
                 "tool_trace": tool_trace,
@@ -142,7 +181,7 @@ def run_agent(
     return {
         "reply": fallback_text,
         "tool_trace": tool_trace,
-        "structured": extract_structured_json(fallback_text).model_dump(),
+        "structured": extract_structured_json(fallback_text, tool_trace).model_dump(),
         "iterations": MAX_AGENT_ITERATIONS
     }
 
@@ -152,7 +191,7 @@ async def stream_agent(
     temperature: float = 0.0,
     min_score: Optional[float] = None
 ) -> AsyncGenerator[str, None]:
-    """SSE streaming generator yielding live events, tool execution traces, and tokens."""
+    """SSE streaming generator yielding live events, tool execution traces, and real-time tokens."""
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     
     if history:
@@ -163,60 +202,103 @@ async def stream_agent(
                 messages.append({"role": role, "content": content})
                 
     messages.append({"role": "user", "content": user_message})
+    tool_trace = []
+    total_accumulated_text = ""
     
     yield f"data: {json.dumps({'type': 'status', 'content': 'กำลังวิเคราะห์ข้อกำหนดพื้นที่และความปลอดภัย...'}, ensure_ascii=False)}\n\n"
     
     for iteration in range(MAX_AGENT_ITERATIONS):
         try:
-            response = client.chat.completions.create(
+            stream_resp = client.chat.completions.create(
                 model=MODEL,
                 messages=messages,
                 tools=TOOLS_SPEC,
-                temperature=temperature
+                temperature=temperature,
+                stream=True
             )
         except Exception as e:
+            logger.error(f"LLM streaming error: {e}")
             yield f"data: {json.dumps({'type': 'error', 'content': f'Upstream error: {str(e)}'}, ensure_ascii=False)}\n\n"
             return
             
-        choice = response.choices[0]
-        message = choice.message
+        tool_calls_dict = {}
+        iteration_content = ""
         
-        if message.tool_calls:
-            messages.append(message)
-            for tool_call in message.tool_calls:
-                fn_name = tool_call.function.name
+        for chunk in stream_resp:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            
+            # Stream tokens live as they arrive from the LLM
+            if delta.content:
+                iteration_content += delta.content
+                yield f"data: {json.dumps({'type': 'token', 'token': delta.content}, ensure_ascii=False)}\n\n"
+                
+            # Accumulate streaming tool call deltas
+            if delta.tool_calls:
+                for tc in delta.tool_calls:
+                    idx = tc.index
+                    if idx not in tool_calls_dict:
+                        tool_calls_dict[idx] = {"id": tc.id or "", "name": "", "arguments": ""}
+                    if tc.id:
+                        tool_calls_dict[idx]["id"] = tc.id
+                    if tc.function and tc.function.name:
+                        tool_calls_dict[idx]["name"] += tc.function.name
+                    if tc.function and tc.function.arguments:
+                        tool_calls_dict[idx]["arguments"] += tc.function.arguments
+
+        if iteration_content:
+            total_accumulated_text += iteration_content
+
+        if tool_calls_dict:
+            formatted_tool_calls = []
+            for tc in tool_calls_dict.values():
+                formatted_tool_calls.append({
+                    "id": tc["id"],
+                    "type": "function",
+                    "function": {"name": tc["name"], "arguments": tc["arguments"]}
+                })
+                
+            messages.append({
+                "role": "assistant",
+                "content": iteration_content if iteration_content else None,
+                "tool_calls": formatted_tool_calls
+            })
+            
+            for tc in tool_calls_dict.values():
+                fn_name = tc["name"]
                 try:
-                    fn_args = json.loads(tool_call.function.arguments)
+                    fn_args = json.loads(tc["arguments"])
                 except Exception:
                     fn_args = {}
                     
                 tool_label = {
-                    "evaluate_root_hazard": "กำลังคำนวณระยะร่นและแรงดันระบบราก",
-                    "search_trees_by_criteria": "กำลังค้นหาพันธุ์ไม้ตามขนาดพื้นที่และแดด",
-                    "search_tree_knowledge": "กำลังค้นคว้าเอกสารรุกขกรรมพรรณไม้ (RAG)"
+                    "evaluate_root_hazard": "คำนวณระยะร่นและแรงดันระบบราก",
+                    "search_trees_by_criteria": "ค้นหาพันธุ์ไม้ตามขนาดพื้นที่และแดด",
+                    "search_tree_knowledge": "ค้นคว้าเอกสารรุกขกรรมพรรณไม้ (RAG)"
                 }.get(fn_name, fn_name)
                 
                 yield f"data: {json.dumps({'type': 'tool_call', 'tool': fn_name, 'label': tool_label, 'args': fn_args}, ensure_ascii=False)}\n\n"
                 
-                tool_result = dispatch_tool(fn_name, fn_args)
+                tool_result = dispatch_tool(fn_name, fn_args, min_score=min_score)
+                tool_trace.append({"tool": fn_name, "args": fn_args, "result": tool_result})
                 
-                yield f"data: {json.dumps({'type': 'tool_result', 'tool': fn_name, 'result': tool_result}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'tool_result', 'tool': fn_name, 'label': tool_label, 'result': tool_result}, ensure_ascii=False)}\n\n"
                 
                 messages.append({
                     "role": "tool",
-                    "tool_call_id": tool_call.id,
+                    "tool_call_id": tc["id"],
                     "content": json.dumps(tool_result, ensure_ascii=False)
                 })
-        else:
-            final_text = message.content or ""
-            # Stream final tokens or text chunks
-            chunk_size = 20
-            for i in range(0, len(final_text), chunk_size):
-                chunk = final_text[i:i+chunk_size]
-                yield f"data: {json.dumps({'type': 'token', 'token': chunk}, ensure_ascii=False)}\n\n"
                 
-            structured_data = extract_structured_json(final_text)
+            yield f"data: {json.dumps({'type': 'status', 'content': 'กำลังประมวลผลคำแนะนำรุกขกรรม...'}, ensure_ascii=False)}\n\n"
+        else:
+            # Final text generated directly
+            structured_data = extract_structured_json(total_accumulated_text, tool_trace)
             yield f"data: {json.dumps({'type': 'done', 'structured': structured_data.model_dump() if structured_data else None}, ensure_ascii=False)}\n\n"
             return
             
-    yield f"data: {json.dumps({'type': 'done', 'structured': None}, ensure_ascii=False)}\n\n"
+    # Max iterations exceeded fallback
+    fallback_text = "การประเมินใช้จำนวนรอบเกินกำหนด สรุปเบื้องต้น: ควรเว้นระยะร่นอย่างน้อย 4 เมตรจากโครงสร้างเพื่อความปลอดภัย"
+    structured_data = extract_structured_json(fallback_text, tool_trace)
+    yield f"data: {json.dumps({'type': 'done', 'structured': structured_data.model_dump() if structured_data else None}, ensure_ascii=False)}\n\n"

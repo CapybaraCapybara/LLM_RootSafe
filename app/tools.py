@@ -1,6 +1,7 @@
 import json
 import logging
-from typing import Dict, Any, List
+import re
+from typing import Dict, Any, List, Optional
 from app.models import RootHazardArgs, TreeFilterArgs, TreeKnowledgeArgs
 from app.rag import load_trees_catalog, retrieve_tree_docs
 
@@ -23,21 +24,36 @@ def find_tree_in_catalog(tree_name: str) -> Dict[str, Any] | None:
     trees = load_trees_catalog()
     query = tree_name.strip().lower()
     
-    # Exact or substring match in Thai / English / Scientific name
+    # Strip common Thai prefixes/suffixes e.g. "ต้นหูกระจง", "ไทรย้อยลงดิน"
+    clean_query = re.sub(r"^(?:ต้น|พันธุ์ไม้|ต้นไม้)\s*", "", query)
+    clean_query = re.sub(r"\s*(?:ลงดิน|ในกระถาง|ในกระบะ).*$", "", clean_query).strip()
+    
+    # Direct match against full names
     for tree in trees:
-        if (
-            query == tree["name_th"].lower()
-            or query == tree["name_en"].lower()
-            or query in tree["name_th"].lower()
-            or query in tree["name_en"].lower()
-        ):
+        name_th = tree["name_th"].lower()
+        name_en = tree["name_en"].lower()
+        sci_name = tree.get("scientific_name", "").lower()
+        if query in [name_th, name_en, sci_name] or (clean_query and clean_query in [name_th, name_en, sci_name]):
             return tree
             
-    # Substring in Thai name (e.g. 'หูกระจง' in 'ต้นหูกระจง')
+    # Check aliases and subparts (e.g. "กาสะลอง", "ตีนเป็ด", "ก้ามปู", "ไทรย้อย")
     for tree in trees:
-        if tree["name_th"].lower() in query:
-            return tree
+        name_th = tree["name_th"].lower()
+        name_en = tree["name_en"].lower()
+        cleaned = re.sub(r"\((?:ลงดิน|ในกระบะคอนกรีต|ปลูกในกระถาง[^\)]*|ไม้เลื้อยซุ้ม)\)", "", name_th)
+        clean_parts = cleaned.replace("(", "/").replace(")", "/").replace("（", "/").replace("）", "/")
+        aliases = [p.strip() for p in clean_parts.split("/") if len(p.strip()) > 1]
+        if name_en:
+            aliases.append(name_en.strip())
             
+        for a in aliases:
+            if a == query or (clean_query and a == clean_query):
+                return tree
+            if len(a) >= 3 and (a in query or (clean_query and a in clean_query)):
+                return tree
+            if len(clean_query) >= 3 and clean_query in a:
+                return tree
+                
     return None
 
 def evaluate_root_hazard(args: RootHazardArgs) -> Dict[str, Any]:
@@ -102,7 +118,8 @@ def evaluate_root_hazard(args: RootHazardArgs) -> Dict[str, Any]:
         "root_type": tree["root_type"],
         "explanation": action,
         "root_behavior": tree["root_risk_description"],
-        "legal_neighbor_risk": tree["legal_neighbor_risk"],
+        "neighbor_impact": tree.get("legal_neighbor_risk", "ระวังกิ่งก้านและระบบรากแผ่ขยาย"),
+        "legal_neighbor_risk": tree.get("legal_neighbor_risk", "ระวังกิ่งก้านและระบบรากแผ่ขยาย"),
         "citations": [f"[Doc: {tree['name_th']}]"]
     }
 
@@ -150,9 +167,9 @@ def search_trees_by_criteria(args: TreeFilterArgs) -> Dict[str, Any]:
         "citations": [f"[Doc: {t['name_th']}]" for t in matched[:4]]
     }
 
-def search_tree_knowledge(args: TreeKnowledgeArgs) -> Dict[str, Any]:
+def search_tree_knowledge(args: TreeKnowledgeArgs, min_score: Optional[float] = None) -> Dict[str, Any]:
     """Retrieve grounded knowledge snippets with citations."""
-    docs = retrieve_tree_docs(query=args.query, top_k=args.top_k)
+    docs = retrieve_tree_docs(query=args.query, min_score=min_score, top_k=args.top_k)
     return {
         "results_count": len(docs),
         "documents": [
@@ -165,7 +182,7 @@ def search_tree_knowledge(args: TreeKnowledgeArgs) -> Dict[str, Any]:
         ]
     }
 
-def dispatch_tool(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+def dispatch_tool(tool_name: str, arguments: Dict[str, Any], min_score: Optional[float] = None) -> Dict[str, Any]:
     """Safe tool dispatcher with strict allow-listing and Pydantic validation."""
     if tool_name not in ALLOWED_TOOLS:
         return {"error": f"Tool '{tool_name}' is not in the allowed tools list."}
@@ -179,7 +196,7 @@ def dispatch_tool(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
             return search_trees_by_criteria(parsed_args)
         elif tool_name == "search_tree_knowledge":
             parsed_args = TreeKnowledgeArgs(**arguments)
-            return search_tree_knowledge(parsed_args)
+            return search_tree_knowledge(parsed_args, min_score=min_score)
     except Exception as e:
         logger.error(f"Error executing tool {tool_name}: {e}")
         return {"error": f"Invalid arguments for tool '{tool_name}': {str(e)}"}
