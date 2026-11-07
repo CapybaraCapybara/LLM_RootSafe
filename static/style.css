@@ -441,11 +441,61 @@ body {
   transform: translateY(-1px);
 }
 
-/* Tool Execution Box (Hidden for clean user interface) */
-.tool-trace-box,
-.tools-container,
-.tool-status {
-  display: none !important;
+/* Live Agent Tool Execution Tray & Pills */
+.agent-tool-tray {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.live-tool-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-family: var(--font-body);
+  transition: all 0.25s ease;
+  width: fit-content;
+}
+
+.live-tool-pill.running {
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  color: #93c5fd;
+  animation: pillPulse 1.5s infinite alternate;
+}
+
+.live-tool-pill.running .tool-icon-spin {
+  display: inline-block;
+  animation: spin 1.2s linear infinite;
+}
+
+.live-tool-pill.done {
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #6ee7b7;
+}
+
+.live-tool-pill .tool-label {
+  font-weight: 500;
+}
+
+.live-tool-pill .tool-status-tag {
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+.live-tool-pill .tool-status-tag.tag-success {
+  color: #34d399;
+  font-weight: 600;
+}
+
+@keyframes pillPulse {
+  from { opacity: 0.85; }
+  to { opacity: 1; border-color: rgba(96, 165, 250, 0.6); }
 }
 
 /* Thinking & Waiting Loader */
