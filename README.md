@@ -137,6 +137,9 @@ python eval/run_eval.py
 ```
 สคริปต์จะทำการทดสอบทั้ง 30 ข้อ และสร้างรายงานสรุปใน `eval/results/eval_report.md`
 
+### 5. การรันด้วย Docker & การ Deploy ด้วย AWS CloudFront
+ดูขั้นตอนการรัน Container ผ่าน Docker Compose และคู่มือการตั้งค่าสถาปัตยกรรม AWS CloudFront Distribution ได้ที่ [`deploy/aws-cloudfront-guide.md`](deploy/aws-cloudfront-guide.md)
+
 ---
 
 
@@ -154,7 +157,13 @@ rootsafe-arborist/
 ├── README.md               # รายละเอียดโครงการ วิธีรัน และผลการประเมิน
 ├── .env.example            # ตัวอย่างการตั้งค่า Environment Variables
 ├── .gitignore              # กำหนดไฟล์ที่ไม่ commit (.env, .chroma/, .venv/)
+├── .dockerignore           # กำหนดไฟล์ที่ไม่ copy เข้า Docker Image
+├── Dockerfile              # Production Docker Container Specification
+├── docker-compose.yml      # Local / Staging Container Orchestration
 ├── requirements.txt        # รายการ Dependencies
+│
+├── deploy/
+│   └── aws-cloudfront-guide.md # คู่มือสถาปัตยกรรมและการตั้งค่า AWS CloudFront
 │
 ├── data/
 │   └── trees.json          # คลังข้อมูลพรรณไม้ 42 ชนิด (Raw Corpus)
