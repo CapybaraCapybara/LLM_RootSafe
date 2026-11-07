@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import Literal, Optional, List, Dict, Any
 
 class ChatMessage(BaseModel):
@@ -66,5 +66,22 @@ class ConsultationReport(BaseModel):
     summary: str = Field(..., description="สรุปคำแนะนำทางรุกขกรรมสำหรับเจ้าของบ้าน")
     recommended_trees: List[str] = Field(default_factory=list, description="รายชื่อพันธุ์ไม้ที่แนะนำให้ปลูกแทนหรืออนุญาตให้ปลูกได้")
     safe_setback_meters: float = Field(..., description="ระยะร่นขั้นต่ำที่ปลอดภัยตามหลักวิชาการ (เมตร)")
-    legal_neighbor_risk_notes: str = Field(..., description="ข้อแนะนำเกี่ยวกับแนวรั้วและเพื่อนบ้าน (ตาม ป.พ.พ. 1347)")
+    neighbor_impact_notes: str = Field(
+        default="ระวังกิ่งก้านและระบบรากแผ่ขยายล้ำแนวเขต",
+        description="ข้อควรระวังเกี่ยวกับผลกระทบต่อพื้นที่ข้างเคียง (เช่น กิ่งก้าน ทรงพุ่ม ใบร่วง)"
+    )
+    legal_neighbor_risk_notes: Optional[str] = Field(
+        default=None,
+        description="Deprecated alias for backward compatibility"
+    )
     citations: List[str] = Field(default_factory=list, description="แหล่งอ้างอิงข้อมูลพรรณไม้ที่ใช้ประกอบการวินิจฉัย")
+
+    @model_validator(mode="before")
+    @classmethod
+    def sync_neighbor_notes(cls, data: Any):
+        if isinstance(data, dict):
+            if "neighbor_impact_notes" not in data and "legal_neighbor_risk_notes" in data:
+                data["neighbor_impact_notes"] = data["legal_neighbor_risk_notes"]
+            elif "neighbor_impact_notes" in data and "legal_neighbor_risk_notes" not in data:
+                data["legal_neighbor_risk_notes"] = data["neighbor_impact_notes"]
+        return data

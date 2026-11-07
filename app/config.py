@@ -11,8 +11,14 @@ env_path = BASE_DIR / ".env"
 load_dotenv(dotenv_path=env_path)
 
 # OpenAI Client configured for class proxy
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://llm.nat-d.uk/v1")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+
+raw_base_url = os.getenv("OPENAI_BASE_URL", "").strip()
+if not raw_base_url or raw_base_url.lower() in ("base_url", "your_base_url", "none", "null", ""):
+    OPENAI_BASE_URL = "https://llm.nat-d.uk/v1"
+else:
+    OPENAI_BASE_URL = raw_base_url
+
 MODEL = os.getenv("MODEL", "gemma-4-E4B-it")
 
 # RAG & Storage Settings

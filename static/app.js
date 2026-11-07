@@ -132,7 +132,8 @@ async function sendMessage(text) {
   conversationHistory.push({ role: "user", content: text });
 
   // Prepare Assistant Bubble
-  const { row, contentEl } = createAssistantRow();
+  // Prepare Assistant Bubble
+  const { row, contentEl, bubbleEl, toolTrayEl } = createAssistantRow();
   messagesContainer.appendChild(row);
   scrollToBottom();
 
@@ -175,15 +176,68 @@ async function sendMessage(text) {
         try {
           const evt = JSON.parse(jsonStr);
 
-          if (evt.type === "token") {
+          if (evt.type === "status") {
+            const thinkingText = bubbleEl.querySelector(".thinking-text");
+            if (thinkingText) {
+              thinkingText.textContent = evt.content;
+            }
+          } else if (evt.type === "tool_call") {
+            const thinkingText = bubbleEl.querySelector(".thinking-text");
+            if (thinkingText) {
+              thinkingText.textContent = `🔧 กำลัง${evt.label || evt.tool}...`;
+            }
+            if (toolTrayEl) {
+              toolTrayEl.style.display = "flex";
+              let pill = document.getElementById(`tool-pill-${evt.tool}`);
+              if (!pill) {
+                pill = document.createElement("div");
+                pill.className = "live-tool-pill running";
+                pill.id = `tool-pill-${evt.tool}`;
+                toolTrayEl.appendChild(pill);
+              } else {
+                pill.className = "live-tool-pill running";
+              }
+              pill.innerHTML = `
+                <span class="tool-icon-spin">⚙️</span>
+                <span class="tool-label">${escapeHtml(evt.label || evt.tool)}</span>
+                <span class="tool-status-tag">กำลังประมวลผล...</span>
+              `;
+              scrollToBottom();
+            }
+          } else if (evt.type === "tool_result") {
+            if (toolTrayEl) {
+              const pill = document.getElementById(`tool-pill-${evt.tool}`);
+              if (pill) {
+                pill.className = "live-tool-pill done";
+                let summary = "";
+                if (evt.result && evt.result.verdict) {
+                  summary = `• ${evt.result.verdict} (ระดับเสี่ยง ${evt.result.hazard_score || 0}/10)`;
+                } else if (evt.result && (Array.isArray(evt.result.matching_trees) || Array.isArray(evt.result.trees))) {
+                  const count = evt.result.total_matched ?? (evt.result.trees?.length || 0);
+                  summary = `• พบ ${count} ชนิดพันธุ์`;
+                } else if (evt.result && evt.result.citations) {
+                  summary = `• พบข้อมูลอ้างอิง`;
+                }
+                pill.innerHTML = `
+                  <span class="tool-icon">✅</span>
+                  <span class="tool-label">${escapeHtml(evt.label || evt.tool)}</span>
+                  <span class="tool-status-tag tag-success">เรียบร้อย ${summary}</span>
+                `;
+                scrollToBottom();
+              }
+            }
+          } else if (evt.type === "token") {
             if (!hasReceivedFirstToken) {
               hasReceivedFirstToken = true;
-              contentEl.innerHTML = "";
+              const loader = bubbleEl.querySelector(".thinking-loader");
+              if (loader) loader.remove();
             }
             accumulatedText += evt.token;
             contentEl.innerHTML = formatMarkdown(accumulatedText);
             scrollToBottom();
           } else if (evt.type === "done") {
+            const loader = bubbleEl.querySelector(".thinking-loader");
+            if (loader) loader.remove();
             if (!hasReceivedFirstToken && accumulatedText) {
               contentEl.innerHTML = formatMarkdown(accumulatedText);
             }
@@ -193,6 +247,8 @@ async function sendMessage(text) {
             conversationHistory.push({ role: "assistant", content: accumulatedText });
             scrollToBottom();
           } else if (evt.type === "error") {
+            const loader = bubbleEl.querySelector(".thinking-loader");
+            if (loader) loader.remove();
             contentEl.innerHTML = `<div style="color:var(--danger);margin-top:8px;">⚠️ ${escapeHtml(evt.content)}</div>`;
           }
         } catch (e) {
@@ -225,10 +281,11 @@ function createAssistantRow() {
   row.innerHTML = `
     <div class="avatar">🌿</div>
     <div class="message-bubble">
+      <div class="agent-tool-tray" style="display:none;"></div>
       <div class="message-content">
         <div class="thinking-loader">
           <span class="thinking-spinner"></span>
-          <span class="thinking-text">กรุณารอสักครู่ ระบบกำลังประมวลผลข้อมูล...</span>
+          <span class="thinking-text">กำลังวิเคราะห์ข้อมูลความปลอดภัย...</span>
           <span class="thinking-dots"><span>.</span><span>.</span><span>.</span></span>
         </div>
       </div>
@@ -237,6 +294,8 @@ function createAssistantRow() {
 
   return {
     row,
+    bubbleEl: row.querySelector(".message-bubble"),
+    toolTrayEl: row.querySelector(".agent-tool-tray"),
     contentEl: row.querySelector(".message-content")
   };
 }
@@ -288,20 +347,27 @@ function renderStructuredCard(targetEl, data) {
         <span class="stat-value">${data.safe_setback_meters} เมตร</span>
       </div>
       <div class="stat-item">
-        <span class="stat-label">ข้อกฎหมายแนวรั้ว (ป.พ.พ. 1347)</span>
-        <span class="stat-value" style="font-size:12px;font-weight:400;">${escapeHtml(data.legal_neighbor_risk_notes)}</span>
+        <span class="stat-label">ข้อควรระวังพื้นที่ข้างเคียง</span>
+        <span class="stat-value" style="font-size:12px;font-weight:400;">${escapeHtml(data.neighbor_impact_notes || data.legal_neighbor_risk_notes || "ระวังกิ่งก้านและระบบรากแผ่ขยายล้ำแนวเขต")}</span>
       </div>
     </div>
     ${recHtml}
     ${citesHtml}
+    <div class="legal-disclaimer">
+      * คำแนะนำเพื่อความปลอดภัยเชิงโครงสร้างและรุกขกรรมเบื้องต้น มิใช่คำปรึกษาทางกฎหมาย
+    </div>
   `;
 
   targetEl.appendChild(card);
 }
 
 function formatMarkdown(text) {
-  // Strip raw JSON code blocks from main text rendering since we render the card
-  let clean = text.replace(/```(?:json)?\s*\{[\s\S]*?\}\s*```/g, "").trim();
+  // Strip complete raw JSON code blocks
+  let clean = text.replace(/```(?:json)?\s*\{[\s\S]*?\}\s*```/g, "");
+  // Strip partial JSON block currently being streamed at the end of the response
+  clean = clean.replace(/```(?:json)?\s*\{[\s\S]*$/g, "");
+  // Strip incomplete backtick blocks at end
+  clean = clean.replace(/```(?:json)?\s*$/g, "").trim();
   
   clean = escapeHtml(clean);
   
