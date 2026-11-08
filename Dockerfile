@@ -1,4 +1,5 @@
-# RootSafe Arborist - Ultra-Slim Production Dockerfile (512MB RAM Optimized for Render Free Tier)
+# RootSafe Arborist - Ultra-Slim Production Dockerfile (Optimized for 512MB RAM Free Tier)
+# Memory limit: ~200MB working set, single async worker
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
