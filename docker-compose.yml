@@ -14,7 +14,16 @@ services:
       - MODEL=${MODEL:-gemma-4-E4B-it}
       - RAG_MIN_SCORE=${RAG_MIN_SCORE:-0.35}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
-      interval: 30s
-      timeout: 10s
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/api/health"]
+      interval: 10s
+      timeout: 5s
       retries: 3
+      start_period: 5s
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: rootsafe-tunnel
+    restart: always
+    command: tunnel --no-autoupdate --url http://rootsafe-arborist:8000
+    depends_on:
+      - rootsafe-arborist
