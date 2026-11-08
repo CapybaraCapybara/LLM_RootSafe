@@ -1,8 +1,11 @@
-# RootSafe Arborist - Ultra-Slim Production Dockerfile
+# RootSafe Arborist - Ultra-Slim Production Dockerfile (512MB RAM Optimized for Render Free Tier)
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    MALLOC_ARENA_MAX=2 \
+    OMP_NUM_THREADS=1 \
+    ONNXRUNTIME_NUM_THREADS=1 \
     PORT=8000
 
 WORKDIR /app
@@ -12,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install lightweight Python dependencies (no heavy PyTorch / CUDA)
+# Install lightweight Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -29,5 +32,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=5s --start-period=5s --retries=3 \
     CMD curl -f http://127.0.0.1:8000/api/health || exit 1
 
-# Start Uvicorn server (dynamically binds to $PORT provided by Cloud Provider, falls back to 8000)
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 2"]
+# Start single-worker Uvicorn (Crucial for 512MB RAM tier: keeps total memory under ~200MB)
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]
